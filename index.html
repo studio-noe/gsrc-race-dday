@@ -174,7 +174,11 @@
   .ed-head h2{margin:0;font-size:16px;font-weight:800}
   .ed-x{border:0;background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
   .ed-rows{padding:12px 14px;max-height:52vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
-  .ed-row{display:grid;grid-template-columns:78px 138px 1fr auto;gap:8px;align-items:center}
+  .ed-row{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+  .ed-row .ed-cat{flex:0 0 76px;order:1}
+  .ed-row .ed-dt{flex:1 1 150px;min-width:0;order:2}
+  .ed-row .ed-del{flex:0 0 auto;order:3}
+  .ed-row .ed-name{flex:1 1 100%;order:4}
   .ed-row select,.ed-row input{background:#1c1c22;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 9px;font-size:13px;font-family:var(--ui);min-width:0}
   .ed-row input:focus,.ed-row select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   .ed-del{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:15px;padding:4px}
@@ -309,9 +313,9 @@ const LS_KEY = "gsrc-races-2026";
 function cacheGet(){ try{ const s=localStorage.getItem(LS_KEY); if(s){ const a=JSON.parse(s); if(Array.isArray(a)&&a.length) return a; } }catch(e){} return null; }
 function cacheSet(list){ try{ localStorage.setItem(LS_KEY, JSON.stringify(list)); }catch(e){} }
 async function dbLoad(){
-  const r = await fetch(`${SB_URL}/rest/v1/races?select=category,date,name&order=date.asc,name.asc`, {headers:SB_H});
+  const r = await fetch(`${SB_URL}/rest/v1/races?select=category,date,name,start_time&order=date.asc,name.asc`, {headers:SB_H});
   if(!r.ok) throw new Error("load "+r.status);
-  return (await r.json()).map(x=>[x.category, x.date, x.name]);
+  return (await r.json()).map(x=>[x.category, x.date, x.name, (x.start_time||"08:00").slice(0,5)]);
 }
 // writes go only through the password-gated Edge Function (direct anon writes are blocked by RLS)
 async function dbSave(list, password){
@@ -325,7 +329,7 @@ async function dbSave(list, password){
   return r.json();
 }
 let RACES = cacheGet() || DEFAULT_RACES.map(r=>r.slice());
-const START_HOUR = 8;
+const DEFAULT_TIME = "08:00";
 const TAG = {road:"🏃 로드", trail:"⛰️ 트레일"};
 const CATEN = {road:"Road", trail:"Trail"};
 const WD=["일","월","화","수","목","금","토"];
@@ -334,17 +338,17 @@ const $ = id => document.getElementById(id);
 
 function today(){ const d=new Date(); return new Date(d.getFullYear(),d.getMonth(),d.getDate()); }
 const TODAY_ISO = `${today().getFullYear()}-${pad(today().getMonth()+1)}-${pad(today().getDate())}`;
-function target(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(y,m-1,d,START_HOUR,0,0); }
+function target(iso, time){ const [y,m,d]=iso.split("-").map(Number); const [hh,mm]=(time||DEFAULT_TIME).split(":").map(Number); return new Date(y,m-1,d,hh,mm,0); }
 function diffDays(iso){ const [y,m,d]=iso.split("-").map(Number);
   return Math.round((new Date(y,m-1,d)-today())/86400000); }
 function bucket(n){ if(n<0)return"far"; if(n<=7)return"hot"; if(n<=30)return"warm"; if(n<=50)return"cool"; return"far"; }
 function ddText(n){ return n===0?"D-DAY":(n>0?"D–"+n:"종료"); }
-function fmt(iso){ const [y,m,d]=iso.split("-").map(Number);
-  return `${m}/${pad(d)} (${WD[new Date(y,m-1,d).getDay()]}) 08:00`; }
+function fmt(iso, time){ const [y,m,d]=iso.split("-").map(Number);
+  return `${m}/${pad(d)} (${WD[new Date(y,m-1,d).getDay()]}) ${time||DEFAULT_TIME}`; }
 
 let rows = [];
 function buildRows(){
-  rows = RACES.map(([cat,iso,name])=>({cat,iso,name,n:diffDays(iso)}))
+  rows = RACES.map(([cat,iso,name,time])=>({cat,iso,name,time:time||DEFAULT_TIME,n:diffDays(iso)}))
     .sort((a,b)=> a.iso===b.iso ? a.name.localeCompare(b.name) : a.iso.localeCompare(b.iso));
   rows.forEach((r,i)=> r.i=i);
   const up = rows.filter(r=>r.n>=0);
@@ -481,7 +485,7 @@ function renderHero(){
     applyStage(50); return;
   }
   $("hero-cat").textContent = `[${CATEN[selected.cat]}] ${selected.name}`;
-  $("hero-date").textContent = fmt(selected.iso);
+  $("hero-date").textContent = fmt(selected.iso, selected.time);
   $("hero-name").textContent = selected.name;
   lastStage=null;
   tick();
@@ -500,7 +504,7 @@ function rollDday(){
   clearTimeout(rollTO);
   rolling=true;
   const el=$("hero-dlabel"), start=performance.now(), dur=420;
-  const finalDays = Math.max(0, Math.ceil((target(selected.iso).getTime()-Date.now())/86400000));
+  const finalDays = Math.max(0, Math.ceil((target(selected.iso, selected.time).getTime()-Date.now())/86400000));
   const digits = String(finalDays).length;                       // roll within the same digit count as the target
   const lo = digits<=1 ? 0 : Math.pow(10,digits-1), hi = Math.pow(10,digits)-1;
   (function step(){
@@ -519,7 +523,7 @@ function transitionHero(){        // animated version of renderHero (used on rac
 
 function tick(){
   if(!selected) return;
-  const ms = target(selected.iso).getTime() - Date.now();
+  const ms = target(selected.iso, selected.time).getTime() - Date.now();
   const done = ms<=0;
   $("hero").classList.toggle("done", done);
   const s = Math.max(0, Math.floor(ms/1000));
@@ -537,11 +541,11 @@ function renderList(){
     const b=bucket(r.n), tag = filter==="all" ? `<span class="tag">${CATEN[r.cat]}</span>` : "";
     return `<li data-i="${r.i}" class="${r.n<0?'past ':''}${selected&&selected.i===r.i?'sel':''}">
       <span class="dot" style="background:var(--${b})"></span>
-      <div><div class="row-h"><span class="name">${r.name}</span>${tag}</div><div class="date">${fmt(r.iso)}</div></div>
+      <div><div class="row-h"><span class="name">${r.name}</span>${tag}</div><div class="date">${fmt(r.iso, r.time)}</div></div>
       <div class="dday" style="color:var(--${b})">${ddText(r.n)}</div>
     </li>`;
   }).join("");
-  $("foot").textContent = `${list.length}개 · 남음 ${upl.length}개 · 아침 8시 기준`;
+  $("foot").textContent = `${list.length}개 / 남음 ${upl.length}개`;
 }
 
 function renderCal(){
@@ -621,7 +625,7 @@ const hexA = (h,a)=>{ const n=parseInt(h.slice(1),16); return `rgba(${(n>>16)&25
 function makeShareImage(){                       // renders a D-day card that mirrors the screen
   const W=1080, H=1440, c=document.createElement("canvas"); c.width=W; c.height=H;
   const x=c.getContext("2d");
-  const days = Math.max(0, Math.ceil((target(selected.iso).getTime()-Date.now())/86400000));
+  const days = Math.max(0, Math.ceil((target(selected.iso, selected.time).getTime()-Date.now())/86400000));
   const dtxt = days<=0 ? "D–DAY" : "D–"+days;
   const trail = selected.cat==="trail";
   const tint  = trail ? "#8a3ffb" : "#2f5bff";
@@ -636,7 +640,7 @@ function makeShareImage(){                       // renders a D-day card that mi
   // lockup (top-left)
   x.textAlign="left"; x.fillStyle="#fff"; x.font=`600 30px ${UIF}`;
   x.fillText(`[${CATEN[selected.cat]}] ${selected.name}`, 64, 90);
-  x.fillStyle="rgba(255,255,255,.72)"; x.font=`400 25px ${UIF}`; x.fillText(fmt(selected.iso), 64, 130);
+  x.fillStyle="rgba(255,255,255,.72)"; x.font=`400 25px ${UIF}`; x.fillText(fmt(selected.iso, selected.time), 64, 130);
   // center
   x.textAlign="center";
   x.fillStyle="#fff"; x.font=`700 44px ${UIF}`; x.fillText(selected.name, W/2, H*0.46);
@@ -658,7 +662,7 @@ function showImageOverlay(blob){       // in-app browsers (KakaoTalk etc.): show
 }
 $("share").onclick = async () => {
   if(!selected) return;
-  const days = Math.max(0, Math.ceil((target(selected.iso).getTime()-Date.now())/86400000));
+  const days = Math.max(0, Math.ceil((target(selected.iso, selected.time).getTime()-Date.now())/86400000));
   const dtxt = days<=0 ? "오늘 레이스! 🏁" : "D-"+days;
   const url  = location.origin + location.pathname + "#r=" + encodeURIComponent(selected.name);
   const text = `🏃 ${selected.name} · ${dtxt}`;
@@ -679,20 +683,21 @@ $("share").onclick = async () => {
 };
 
 // ── race editor popup (persists to localStorage) ──
-function edRow(cat,iso,name){
+function edRow(cat,iso,name,time){
   const el=document.createElement("div"); el.className="ed-row";
   el.innerHTML=`<select class="ed-cat"><option value="road">Road</option><option value="trail">Trail</option></select>`
-    +`<input class="ed-date" type="date" value="${iso}">`
+    +`<input class="ed-dt" type="datetime-local">`
     +`<input class="ed-name" type="text" placeholder="대회명">`
     +`<button class="ed-del" aria-label="삭제">🗑</button>`;
   el.querySelector(".ed-cat").value = cat||"road";
   el.querySelector(".ed-name").value = name||"";
+  el.querySelector(".ed-dt").value = iso ? `${iso}T${time||DEFAULT_TIME}` : "";
   el.querySelector(".ed-del").onclick=()=>el.remove();
   return el;
 }
 function renderEditor(){
   const box=$("ed-rows"); box.innerHTML="";
-  RACES.slice().sort((a,b)=>a[1].localeCompare(b[1])).forEach(([c,i,n])=>box.appendChild(edRow(c,i,n)));
+  RACES.slice().sort((a,b)=>a[1].localeCompare(b[1])).forEach(([c,i,n,t])=>box.appendChild(edRow(c,i,n,t)));
 }
 let editPass = "";                                 // verified password kept for the session's save
 async function dbVerify(pw){
@@ -705,11 +710,10 @@ async function dbVerify(pw){
   return true;
 }
 async function saveEditor(){
-  const list = [...$("ed-rows").querySelectorAll(".ed-row")].map(el=>[
-    el.querySelector(".ed-cat").value,
-    el.querySelector(".ed-date").value,
-    el.querySelector(".ed-name").value.trim()
-  ]).filter(r=>r[1] && r[2]);
+  const list = [...$("ed-rows").querySelectorAll(".ed-row")].map(el=>{
+    const [d, tm] = (el.querySelector(".ed-dt").value || "").split("T");   // "2026-08-30T08:00"
+    return [el.querySelector(".ed-cat").value, d||"", el.querySelector(".ed-name").value.trim(), (tm||DEFAULT_TIME)];
+  }).filter(r=>r[1] && r[2]);
   const btn=$("ed-save"), label=btn.textContent; btn.disabled=true; btn.textContent="저장 중…";
   try{
     await dbSave(list, editPass);
